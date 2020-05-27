@@ -21,10 +21,6 @@
 #ifndef ASYNCWEBSERVERHANDLERIMPL_H_
 #define ASYNCWEBSERVERHANDLERIMPL_H_
 
-#include <string>
-#ifdef ASYNCWEBSERVER_REGEX
-#include <regex>
-#endif
 
 #include "stddef.h"
 #include <time.h>
@@ -71,13 +67,9 @@ class AsyncCallbackWebHandler: public AsyncWebHandler {
     ArRequestHandlerFunction _onRequest;
     ArUploadHandlerFunction _onUpload;
     ArBodyHandlerFunction _onBody;
-    bool _isRegex;
   public:
-    AsyncCallbackWebHandler() : _uri(), _method(HTTP_ANY), _onRequest(NULL), _onUpload(NULL), _onBody(NULL), _isRegex(false) {}
-    void setUri(const String& uri){ 
-      _uri = uri; 
-      _isRegex = uri.startsWith("^") && uri.endsWith("$");
-    }
+    AsyncCallbackWebHandler() : _uri(), _method(HTTP_ANY), _onRequest(NULL), _onUpload(NULL), _onBody(NULL){}
+    void setUri(const String& uri){ _uri = uri; }
     void setMethod(WebRequestMethodComposite method){ _method = method; }
     void onRequest(ArRequestHandlerFunction fn){ _onRequest = fn; }
     void onUpload(ArUploadHandlerFunction fn){ _onUpload = fn; }
@@ -91,27 +83,7 @@ class AsyncCallbackWebHandler: public AsyncWebHandler {
       if(!(_method & request->method()))
         return false;
 
-#ifdef ASYNCWEBSERVER_REGEX
-      if (_isRegex) {
-        std::regex pattern(_uri.c_str());
-        std::smatch matches;
-        std::string s(request->url().c_str());
-        if(std::regex_search(s, matches, pattern)) {
-          for (size_t i = 1; i < matches.size(); ++i) { // start from 1
-            request->_addPathParam(matches[i].str().c_str());
-          }
-        } else {
-          return false;
-        }
-      } else 
-#endif
-      if (_uri.length() && _uri.endsWith("*")) {
-        String uriTemplate = String(_uri);
-	uriTemplate = uriTemplate.substring(0, uriTemplate.length() - 1);
-        if (!request->url().startsWith(uriTemplate))
-          return false;
-      }
-      else if(_uri.length() && (_uri != request->url() && !request->url().startsWith(_uri+"/")))
+      if(_uri.length() && (_uri != request->url() && !request->url().startsWith(_uri+"/")))
         return false;
 
       request->addInterestingHeader("ANY");

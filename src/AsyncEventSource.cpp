@@ -124,7 +124,6 @@ AsyncEventSourceMessage::~AsyncEventSourceMessage() {
 }
 
 size_t AsyncEventSourceMessage::ack(size_t len, uint32_t time) {
-  (void)time;
   // If the whole message is now acked...
   if(_acked + len > _len){
      // Return the number of extra bytes acked (they will be carried on to the next message)
@@ -138,6 +137,9 @@ size_t AsyncEventSourceMessage::ack(size_t len, uint32_t time) {
 }
 
 size_t AsyncEventSourceMessage::send(AsyncClient *client) {
+  #ifdef DEBUG_WEBSERVER_LIB
+    Serial.printf("send(AsyncClient *client)\n\r");
+  #endif
   const size_t len = _len - _sent;
   if(client->space() < len){
     return 0;
@@ -162,8 +164,8 @@ AsyncEventSourceClient::AsyncEventSourceClient(AsyncWebServerRequest *request, A
     
   _client->setRxTimeout(0);
   _client->onError(NULL, NULL);
-  _client->onAck([](void *r, AsyncClient* c, size_t len, uint32_t time){ (void)c; ((AsyncEventSourceClient*)(r))->_onAck(len, time); }, this);
-  _client->onPoll([](void *r, AsyncClient* c){ (void)c; ((AsyncEventSourceClient*)(r))->_onPoll(); }, this);
+  _client->onAck([](void *r, AsyncClient* c, size_t len, uint32_t time){ ((AsyncEventSourceClient*)(r))->_onAck(len, time); }, this);
+  _client->onPoll([](void *r, AsyncClient* c){ ((AsyncEventSourceClient*)(r))->_onPoll(); }, this);
   _client->onData(NULL, NULL);
   _client->onTimeout([this](void *r, AsyncClient* c __attribute__((unused)), uint32_t time){ ((AsyncEventSourceClient*)(r))->_onTimeout(time); }, this);
   _client->onDisconnect([this](void *r, AsyncClient* c){ ((AsyncEventSourceClient*)(r))->_onDisconnect(); delete c; }, this);
@@ -184,14 +186,10 @@ void AsyncEventSourceClient::_queueMessage(AsyncEventSourceMessage *dataMessage)
     delete dataMessage;
     return;
   }
-  if(_messageQueue.length() >= SSE_MAX_QUEUED_MESSAGES){
-      ets_printf("ERROR: Too many messages queued\n");
-      delete dataMessage;
-  } else {
-      _messageQueue.add(dataMessage);
-  }
-  if(_client->canSend())
-    _runQueue();
+
+  _messageQueue.add(dataMessage);
+
+  _runQueue();
 }
 
 void AsyncEventSourceClient::_onAck(size_t len, uint32_t time){
@@ -293,26 +291,9 @@ void AsyncEventSource::close(){
   }
 }
 
-// pmb fix
-size_t AsyncEventSource::avgPacketsWaiting() const {
-  if(_clients.isEmpty())
-    return 0;
-  
-  size_t    aql=0;
-  uint32_t  nConnectedClients=0;
-  
-  for(const auto &c: _clients){
-    if(c->connected()) {
-      aql+=c->packetsWaiting();
-      ++nConnectedClients;
-    }
-  }
-//  return aql / nConnectedClients;
-  return ((aql) + (nConnectedClients/2))/(nConnectedClients); // round up
-}
-
 void AsyncEventSource::send(const char *message, const char *event, uint32_t id, uint32_t reconnect){
-
+  if(_clients.isEmpty())
+    return;
 
   String ev = generateEventMessage(message, event, id, reconnect);
   for(const auto &c: _clients){
@@ -329,9 +310,8 @@ size_t AsyncEventSource::count() const {
 }
 
 bool AsyncEventSource::canHandle(AsyncWebServerRequest *request){
-  if(request->method() != HTTP_GET || !request->url().equals(_url)) {
+  if(request->method() != HTTP_GET || !request->url().equals(_url) || !request->isExpectedRequestedConnType(RCT_EVENT))
     return false;
-  }
   request->addInterestingHeader("Last-Event-ID");
   return true;
 }
@@ -354,8 +334,10 @@ AsyncEventSourceResponse::AsyncEventSourceResponse(AsyncEventSource *server){
 }
 
 void AsyncEventSourceResponse::_respond(AsyncWebServerRequest *request){
-  String out = _assembleHead(request->version());
-  request->client()->write(out.c_str(), _headLength);
+  uint16_t header_max_length = 200;
+  char header_ctr[header_max_length];
+  _headLength = _assembleHead(header_ctr, request->version(), header_max_length);
+  request->client()->write(header_ctr, _headLength);
   _state = RESPONSE_WAIT_ACK;
 }
 

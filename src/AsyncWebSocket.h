@@ -31,21 +31,6 @@
 #endif
 #include <ESPAsyncWebServer.h>
 
-#include "AsyncWebSynchronization.h"
-
-#ifdef ESP8266
-#include <Hash.h>
-#ifdef CRYPTO_HASH_h // include Hash.h from espressif framework if the first include was from the crypto library
-#include <../src/Hash.h>
-#endif
-#endif
-
-#ifdef ESP32
-#define DEFAULT_MAX_WS_CLIENTS 8
-#else
-#define DEFAULT_MAX_WS_CLIENTS 4
-#endif
-
 class AsyncWebSocket;
 class AsyncWebSocketResponse;
 class AsyncWebSocketClient;
@@ -94,8 +79,8 @@ class AsyncWebSocketMessageBuffer {
     AsyncWebSocketMessageBuffer(const AsyncWebSocketMessageBuffer &); 
     AsyncWebSocketMessageBuffer(AsyncWebSocketMessageBuffer &&); 
     ~AsyncWebSocketMessageBuffer(); 
-    void operator ++(int i) { (void)i; _count++; }
-    void operator --(int i) { (void)i; if (_count > 0) { _count--; } ;  }
+    void operator ++(int i) { _count++; }
+    void operator --(int i) {  if (_count > 0) { _count--; } ;  }
     bool reserve(size_t size);
     void lock() { _lock = true; }
     void unlock() { _lock = false; }
@@ -204,7 +189,6 @@ class AsyncWebSocketClient {
 
     //data packets
     void message(AsyncWebSocketMessage *message){ _queueMessage(message); }
-    bool queueIsFull();
 
     size_t printf(const char *format, ...)  __attribute__ ((format (printf, 2, 3)));
 #ifndef ESP32
@@ -226,8 +210,6 @@ class AsyncWebSocketClient {
     void binary(const __FlashStringHelper *data, size_t len);
     void binary(AsyncWebSocketMessageBuffer *buffer); 
 
-    bool canSend() { return _messageQueue.length() < WS_MAX_QUEUED_MESSAGES; }
-
     //system callbacks (do not call)
     void _onAck(size_t len, uint32_t time);
     void _onError(int8_t);
@@ -241,24 +223,18 @@ typedef std::function<void(AsyncWebSocket * server, AsyncWebSocketClient * clien
 
 //WebServer Handler implementation that plays the role of a socket server
 class AsyncWebSocket: public AsyncWebHandler {
-  public:
-    typedef LinkedList<AsyncWebSocketClient *> AsyncWebSocketClientLinkedList;
   private:
     String _url;
-    AsyncWebSocketClientLinkedList _clients;
+    LinkedList<AsyncWebSocketClient *> _clients;
     uint32_t _cNextId;
     AwsEventHandler _eventHandler;
     bool _enabled;
-    AsyncWebLock _lock;
-
   public:
     AsyncWebSocket(const String& url);
     ~AsyncWebSocket();
     const char * url() const { return _url.c_str(); }
     void enable(bool e){ _enabled = e; }
     bool enabled() const { return _enabled; }
-    bool availableForWriteAll();
-    bool availableForWrite(uint32_t id);
 
     size_t count() const;
     AsyncWebSocketClient * client(uint32_t id);
@@ -266,7 +242,6 @@ class AsyncWebSocket: public AsyncWebHandler {
 
     void close(uint32_t id, uint16_t code=0, const char * message=NULL);
     void closeAll(uint16_t code=0, const char * message=NULL);
-    void cleanupClients(uint16_t maxClients = DEFAULT_MAX_WS_CLIENTS);
 
     void ping(uint32_t id, uint8_t *data=NULL, size_t len=0);
     void pingAll(uint8_t *data=NULL, size_t len=0); //  done
@@ -330,8 +305,6 @@ class AsyncWebSocket: public AsyncWebHandler {
     AsyncWebSocketMessageBuffer * makeBuffer(uint8_t * data, size_t size); 
     LinkedList<AsyncWebSocketMessageBuffer *> _buffers;
     void _cleanBuffers(); 
-
-    AsyncWebSocketClientLinkedList getClients() const;
 };
 
 //WebServer response to authenticate the socket and detach the tcp client from the web server request

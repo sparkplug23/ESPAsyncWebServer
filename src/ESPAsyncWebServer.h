@@ -38,12 +38,6 @@
 #error Platform not supported
 #endif
 
-#ifdef ASYNCWEBSERVER_REGEX
-#define ASYNCWEBSERVER_REGEX_ATTRIBUTE
-#else
-#define ASYNCWEBSERVER_REGEX_ATTRIBUTE __attribute__((warning("ASYNCWEBSERVER_REGEX not defined")))
-#endif
-
 #define DEBUGF(...) //Serial.printf(__VA_ARGS__)
 
 class AsyncWebServer;
@@ -135,7 +129,6 @@ class AsyncWebServerRequest {
   using File = fs::File;
   using FS = fs::FS;
   friend class AsyncWebServer;
-  friend class AsyncCallbackWebHandler;
   private:
     AsyncClient* _client;
     AsyncWebServer* _server;
@@ -165,7 +158,6 @@ class AsyncWebServerRequest {
 
     LinkedList<AsyncWebHeader *> _headers;
     LinkedList<AsyncWebParameter *> _params;
-    LinkedList<String *> _pathParams;
 
     uint8_t _multiParseState;
     uint8_t _boundaryPosition;
@@ -187,7 +179,6 @@ class AsyncWebServerRequest {
     void _onData(void *buf, size_t len);
 
     void _addParam(AsyncWebParameter*);
-    void _addPathParam(const char *param);
 
     bool _parseReqHead();
     bool _parseReqHeader();
@@ -207,7 +198,9 @@ class AsyncWebServerRequest {
     AsyncWebServerRequest(AsyncWebServer*, AsyncClient*);
     ~AsyncWebServerRequest();
 
-    AsyncClient* client(){ return _client; }
+    AsyncClient* client(){ 
+      //Serial.println("client() ret"); 
+      return _client; }
     uint8_t version() const { return _version; }
     WebRequestMethodComposite method() const { return _method; }
     const String& url() const { return _url; }
@@ -231,27 +224,48 @@ class AsyncWebServerRequest {
     void setHandler(AsyncWebHandler *handler){ _handler = handler; }
     void addInterestingHeader(const String& name);
 
-    void redirect(const String& url);
+    void redirect(char* url);
 
     void send(AsyncWebServerResponse *response);
-    void send(int code, const String& contentType=String(), const String& content=String());
-    void send(FS &fs, const String& path, const String& contentType=String(), bool download=false, AwsTemplateProcessor callback=nullptr);
-    void send(File content, const String& path, const String& contentType=String(), bool download=false, AwsTemplateProcessor callback=nullptr);
-    void send(Stream &stream, const String& contentType, size_t len, AwsTemplateProcessor callback=nullptr);
-    void send(const String& contentType, size_t len, AwsResponseFiller callback, AwsTemplateProcessor templateCallback=nullptr);
-    void sendChunked(const String& contentType, AwsResponseFiller callback, AwsTemplateProcessor templateCallback=nullptr);
-    void send_P(int code, const String& contentType, const uint8_t * content, size_t len, AwsTemplateProcessor callback=nullptr);
-    void send_P(int code, const String& contentType, PGM_P content, AwsTemplateProcessor callback=nullptr);
+    // void send2(AsyncWebServerResponse *response);
 
-    AsyncWebServerResponse *beginResponse(int code, const String& contentType=String(), const String& content=String());
-    AsyncWebServerResponse *beginResponse(FS &fs, const String& path, const String& contentType=String(), bool download=false, AwsTemplateProcessor callback=nullptr);
-    AsyncWebServerResponse *beginResponse(File content, const String& path, const String& contentType=String(), bool download=false, AwsTemplateProcessor callback=nullptr);
-    AsyncWebServerResponse *beginResponse(Stream &stream, const String& contentType, size_t len, AwsTemplateProcessor callback=nullptr);
-    AsyncWebServerResponse *beginResponse(const String& contentType, size_t len, AwsResponseFiller callback, AwsTemplateProcessor templateCallback=nullptr);
-    AsyncWebServerResponse *beginChunkedResponse(const String& contentType, AwsResponseFiller callback, AwsTemplateProcessor templateCallback=nullptr);
-    AsyncResponseStream *beginResponseStream(const String& contentType, size_t bufferSize=1460);
-    AsyncWebServerResponse *beginResponse_P(int code, const String& contentType, const uint8_t * content, size_t len, AwsTemplateProcessor callback=nullptr);
-    AsyncWebServerResponse *beginResponse_P(int code, const String& contentType, PGM_P content, AwsTemplateProcessor callback=nullptr);
+
+
+    // Only supported for legacy
+    void send_serial(int code, char* contentType=nullptr, char* content=nullptr);
+
+
+
+
+    void send(FS &fs, char* path, char* contentType=nullptr, bool download=false, AwsTemplateProcessor callback=nullptr);
+    void send(File content, char* path, char* contentType=nullptr, bool download=false, AwsTemplateProcessor callback=nullptr);
+    void send(Stream &stream, char* contentType, size_t len, AwsTemplateProcessor callback=nullptr);
+    void send(char* contentType, size_t len, AwsResponseFiller callback, AwsTemplateProcessor templateCallback=nullptr);
+    void sendChunked(char* contentType, AwsResponseFiller callback, AwsTemplateProcessor templateCallback=nullptr);
+    
+    void send_P(int code, char* contentType, const uint8_t * content, size_t len, AwsTemplateProcessor callback=nullptr);
+    void send_P(int code, char* contentType, PGM_P content, AwsTemplateProcessor callback=nullptr);
+
+    
+    void send(int code, char* contentType=nullptr, char* content_ptr = nullptr);
+    
+
+
+    AsyncWebServerResponse *beginResponse_serial(int code, char* contentType=nullptr, char* content=nullptr);
+    
+    AsyncWebServerResponse *beginResponse(int code, char* contentType=nullptr, char* content_ptr = nullptr, uint16_t content_len = 0);
+
+    AsyncWebServerResponse *beginResponse(FS &fs, char* path, char* contentType=nullptr, bool download=false, AwsTemplateProcessor callback=nullptr);
+    AsyncWebServerResponse *beginResponse(File content, char* path, char* contentType=nullptr, bool download=false, AwsTemplateProcessor callback=nullptr);
+    AsyncWebServerResponse *beginResponse(Stream &stream, char* contentType, size_t len, AwsTemplateProcessor callback=nullptr);
+    AsyncWebServerResponse *beginResponse(char* contentType, size_t len, AwsResponseFiller callback, AwsTemplateProcessor templateCallback=nullptr);
+    AsyncWebServerResponse *beginChunkedResponse(char* contentType, AwsResponseFiller callback, AwsTemplateProcessor templateCallback=nullptr);
+    AsyncResponseStream *beginResponseStream(char* contentType, size_t bufferSize=1460);
+    AsyncWebServerResponse *beginResponse_P(int code, char* contentType, const uint8_t * content, size_t len, AwsTemplateProcessor callback=nullptr);
+    AsyncWebServerResponse *beginResponse_P(int code, char* contentType, PGM_P content, AwsTemplateProcessor callback=nullptr);
+
+    // AsyncWebServerResponse *beginResponse_P2(int code, char* contentType, const uint8_t * content, size_t len, AwsTemplateProcessor callback=nullptr);
+    // AsyncWebServerResponse *beginResponse_P2(int code, char* contentType, PGM_P content, AwsTemplateProcessor callback=nullptr);
 
     size_t headers() const;                     // get header count
     bool hasHeader(const String& name) const;   // check if header exists
@@ -274,10 +288,8 @@ class AsyncWebServerRequest {
     const String& arg(const __FlashStringHelper * data) const; // get request argument value by F(name)    
     const String& arg(size_t i) const;           // get request argument value by number
     const String& argName(size_t i) const;       // get request argument name by number
-    bool hasArg(const char* name) const;         // check if argument exists
-    bool hasArg(const __FlashStringHelper * data) const;         // check if F(argument) exists
-
-    const String& ASYNCWEBSERVER_REGEX_ATTRIBUTE pathArg(size_t i) const;
+    bool hasParam(const char* name) const;         // check if argument exists
+    bool hasParam(const __FlashStringHelper * data) const;         // check if F(argument) exists
 
     const String& header(const char* name) const;// get request header value by name
     const String& header(const __FlashStringHelper * data) const;// get request header value by F(name)    
@@ -314,13 +326,11 @@ class AsyncWebRewrite {
         _toUrl = _toUrl.substring(0, index);
       }
     }
-    virtual ~AsyncWebRewrite(){}
     AsyncWebRewrite& setFilter(ArRequestFilterFunction fn) { _filter = fn; return *this; }
     bool filter(AsyncWebServerRequest *request) const { return _filter == NULL || _filter(request); }
     const String& from(void) const { return _from; }
     const String& toUrl(void) const { return _toUrl; }
     const String& params(void) const { return _params; }
-    virtual bool match(AsyncWebServerRequest *request) { return from() == request->url() && filter(request); }
 };
 
 /*
@@ -359,7 +369,7 @@ class AsyncWebServerResponse {
   protected:
     int _code;
     LinkedList<AsyncWebHeader *> _headers;
-    String _contentType;
+    char*  _contentType;
     size_t _contentLength;
     bool _sendContentLength;
     bool _chunked;
@@ -375,9 +385,9 @@ class AsyncWebServerResponse {
     virtual ~AsyncWebServerResponse();
     virtual void setCode(int code);
     virtual void setContentLength(size_t len);
-    virtual void setContentType(const String& type);
-    virtual void addHeader(const String& name, const String& value);
-    virtual String _assembleHead(uint8_t version);
+    virtual void setContentType(char* type);
+    virtual void addHeader(const char* name, const char* value);
+    virtual uint16_t _assembleHead(char* header_ptr, uint8_t version, uint16_t header_maximum_size = 300);
     virtual bool _started() const;
     virtual bool _finished() const;
     virtual bool _failed() const;
@@ -406,7 +416,6 @@ class AsyncWebServer {
     ~AsyncWebServer();
 
     void begin();
-    void end();
 
 #if ASYNC_TCP_SSL_ENABLED
     void onSslFileRequest(AcSSlFileHandler cb, void* arg);

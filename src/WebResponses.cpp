@@ -4,6 +4,8 @@
   Copyright (c) 2016 Hristo Gochkov. All rights reserved.
   This file is part of the esp8266 core for Arduino environment.
 
+  Modified by Michael Doone to remove as much dependency on Strings as possible
+
   This library is free software; you can redistribute it and/or
   modify it under the terms of the GNU Lesser General Public
   License as published by the Free Software Foundation; either
@@ -22,6 +24,8 @@
 #include "WebResponseImpl.h"
 #include "cbuf.h"
 
+// #define DEBUG_ASYNC
+
 // Since ESP8266 does not link memchr by default, here's its implementation.
 void* memchr(void* ptr, int ch, size_t count)
 {
@@ -32,53 +36,52 @@ void* memchr(void* ptr, int ch, size_t count)
   return nullptr;
 }
 
-
 /*
  * Abstract Response
  * */
 const char* AsyncWebServerResponse::_responseCodeToString(int code) {
   switch (code) {
-    case 100: return "Continue";
-    case 101: return "Switching Protocols";
-    case 200: return "OK";
-    case 201: return "Created";
-    case 202: return "Accepted";
-    case 203: return "Non-Authoritative Information";
-    case 204: return "No Content";
-    case 205: return "Reset Content";
-    case 206: return "Partial Content";
-    case 300: return "Multiple Choices";
-    case 301: return "Moved Permanently";
-    case 302: return "Found";
-    case 303: return "See Other";
-    case 304: return "Not Modified";
-    case 305: return "Use Proxy";
-    case 307: return "Temporary Redirect";
-    case 400: return "Bad Request";
-    case 401: return "Unauthorized";
-    case 402: return "Payment Required";
-    case 403: return "Forbidden";
-    case 404: return "Not Found";
-    case 405: return "Method Not Allowed";
-    case 406: return "Not Acceptable";
-    case 407: return "Proxy Authentication Required";
-    case 408: return "Request Time-out";
-    case 409: return "Conflict";
-    case 410: return "Gone";
-    case 411: return "Length Required";
-    case 412: return "Precondition Failed";
-    case 413: return "Request Entity Too Large";
-    case 414: return "Request-URI Too Large";
-    case 415: return "Unsupported Media Type";
-    case 416: return "Requested range not satisfiable";
-    case 417: return "Expectation Failed";
-    case 500: return "Internal Server Error";
-    case 501: return "Not Implemented";
-    case 502: return "Bad Gateway";
-    case 503: return "Service Unavailable";
-    case 504: return "Gateway Time-out";
-    case 505: return "HTTP Version not supported";
-    default:  return "";
+    case 100: return PSTR("Continue");
+    case 101: return PSTR("Switching Protocols");
+    case 200: return PSTR("OK");
+    case 201: return PSTR("Created");
+    case 202: return PSTR("Accepted");
+    case 203: return PSTR("Non-Authoritative Information");
+    case 204: return PSTR("No Content");
+    case 205: return PSTR("Reset Content");
+    case 206: return PSTR("Partial Content");
+    case 300: return PSTR("Multiple Choices");
+    case 301: return PSTR("Moved Permanently");
+    case 302: return PSTR("Found");
+    case 303: return PSTR("See Other");
+    case 304: return PSTR("Not Modified");
+    case 305: return PSTR("Use Proxy");
+    case 307: return PSTR("Temporary Redirect");
+    case 400: return PSTR("Bad Request");
+    case 401: return PSTR("Unauthorized");
+    case 402: return PSTR("Payment Required");
+    case 403: return PSTR("Forbidden");
+    case 404: return PSTR("Not Found");
+    case 405: return PSTR("Method Not Allowed");
+    case 406: return PSTR("Not Acceptable");
+    case 407: return PSTR("Proxy Authentication Required");
+    case 408: return PSTR("Request Time-out");
+    case 409: return PSTR("Conflict");
+    case 410: return PSTR("Gone");
+    case 411: return PSTR("Length Required");
+    case 412: return PSTR("Precondition Failed");
+    case 413: return PSTR("Request Entity Too Large");
+    case 414: return PSTR("Request-URI Too Large");
+    case 415: return PSTR("Unsupported Media Type");
+    case 416: return PSTR("Requested range not satisfiable");
+    case 417: return PSTR("Expectation Failed");
+    case 500: return PSTR("Internal Server Error");
+    case 501: return PSTR("Not Implemented");
+    case 502: return PSTR("Bad Gateway");
+    case 503: return PSTR("Service Unavailable");
+    case 504: return PSTR("Gateway Time-out");
+    case 505: return PSTR("HTTP Version not supported");
+    default:  return PSTR("");
   }
 }
 
@@ -114,122 +117,210 @@ void AsyncWebServerResponse::setContentLength(size_t len){
     _contentLength = len;
 }
 
-void AsyncWebServerResponse::setContentType(const String& type){
+void AsyncWebServerResponse::setContentType(char* type){
   if(_state == RESPONSE_SETUP)
     _contentType = type;
 }
 
-void AsyncWebServerResponse::addHeader(const String& name, const String& value){
-  _headers.add(new AsyncWebHeader(name, value));
+
+void AsyncWebServerResponse::addHeader(const char* name, const char* value){
+  
+  #ifdef DEBUG_ASYNC
+  Serial.printf("addHeader(const String& name,\n\r");
+  // Serial.println("AsyncBasicResponse");
+  #endif
+
+  _headers.add(new AsyncWebHeader(String(name), String(value)));
 }
 
-String AsyncWebServerResponse::_assembleHead(uint8_t version){
+
+uint16_t AsyncWebServerResponse::_assembleHead(char* buff, uint8_t version, uint16_t buff_size){
   if(version){
-    addHeader("Accept-Ranges","none");
+    addHeader(PSTR("Accept-Ranges"),PSTR("none")); //adds to linked list
     if(_chunked)
-      addHeader("Transfer-Encoding","chunked");
+      addHeader(PSTR("Transfer-Encoding"),PSTR("chunked"));
   }
-  String out = String();
-  int bufSize = 300;
-  char buf[bufSize];
-
-  snprintf(buf, bufSize, "HTTP/1.%d %d %s\r\n", version, _code, _responseCodeToString(_code));
-  out.concat(buf);
-
+  _headLength = 0;
+  _headLength += snprintf(buff+_headLength, buff_size, PSTR("HTTP/1.%d %d %s\r\n"), version, _code, _responseCodeToString(_code));
+  
   if(_sendContentLength) {
-    snprintf(buf, bufSize, "Content-Length: %d\r\n", _contentLength);
-    out.concat(buf);
+    _headLength += snprintf(buff+_headLength, buff_size, PSTR("Content-Length: %d\r\n"), _contentLength);
   }
-  if(_contentType.length()) {
-    snprintf(buf, bufSize, "Content-Type: %s\r\n", _contentType.c_str());
-    out.concat(buf);
+  if(strlen(_contentType)) {
+    _headLength += snprintf(buff+_headLength, buff_size, PSTR("Content-Type: %s\r\n"), _contentType);
   }
 
   for(const auto& header: _headers){
-    snprintf(buf, bufSize, "%s: %s\r\n", header->name().c_str(), header->value().c_str());
-    out.concat(buf);
+    _headLength += snprintf(buff+_headLength, buff_size, PSTR("%s: %s\r\n"), header->name().c_str(), header->value().c_str());
   }
   _headers.free();
 
-  out.concat("\r\n");
-  _headLength = out.length();
-  return out;
+  _headLength += snprintf(buff+_headLength, buff_size, PSTR("\r\n"));
+
+  return _headLength;
 }
 
 bool AsyncWebServerResponse::_started() const { return _state > RESPONSE_SETUP; }
 bool AsyncWebServerResponse::_finished() const { return _state > RESPONSE_WAIT_ACK; }
 bool AsyncWebServerResponse::_failed() const { return _state == RESPONSE_FAILED; }
 bool AsyncWebServerResponse::_sourceValid() const { return false; }
-void AsyncWebServerResponse::_respond(AsyncWebServerRequest *request){ _state = RESPONSE_END; request->client()->close(); }
-size_t AsyncWebServerResponse::_ack(AsyncWebServerRequest *request, size_t len, uint32_t time){ (void)request; (void)len; (void)time; return 0; }
+void AsyncWebServerResponse::_respond(AsyncWebServerRequest *request){ 
+  _state = RESPONSE_END; 
+  #ifdef DEBUG_ASYNC
+    Serial.printf("_respond(AsyncWebServerRequest *request)  SMALL FUNCTION\n\r");
+  #endif
+  request->client()->close(); 
+}
+size_t AsyncWebServerResponse::_ack(AsyncWebServerRequest *request, size_t len, uint32_t time){ return 0; }
 
 /*
- * String/Code Response
+ * Built a basic response by configuring parameters
  * */
-AsyncBasicResponse::AsyncBasicResponse(int code, const String& contentType, const String& content){
+AsyncBasicResponse::AsyncBasicResponse(int code, char* contentType, char* content_ctr, uint16_t content_len){
   _code = code;
-  _content = content;
+  _content_ptr = content_ctr;
   _contentType = contentType;
-  if(_content.length()){
-    _contentLength = _content.length();
-    if(!_contentType.length())
+  _content_len = content_len;
+
+  #ifdef DEBUG_ASYNC
+  Serial.println("AsyncBasicResponse");
+  Serial.printf("_code2=%d\n\r",_code);
+  Serial.printf("_content_ptr=%s\n\r",_content_ptr);
+  Serial.printf("_contentType=%s\n\r",_contentType.c_str());
+  #endif
+
+  // if a value was passed for length, save into _contentLength
+  if(content_len){
+    #ifdef DEBUG_ASYNC
+    Serial.printf("_content_len=%d\n\r",_content_len);
+    #endif
+    _contentLength = _content_len;
+    //assume default type if non is set
+    if(!strlen(_contentType))      
       _contentType = "text/plain";
-  }
-  addHeader("Connection","close");
+  } 
+  //close connection after transmission, basic single packet response
+  addHeader(PSTR("Connection"),PSTR("close"));
 }
 
+/*
+ * Called by callback, used to actually transmit response back to client
+ * */
 void AsyncBasicResponse::_respond(AsyncWebServerRequest *request){
+  #ifdef DEBUG_ASYNC
+  Serial.println("AsyncBasicResponse::_respond(request) = Primary send mechanism");
+  #endif
   _state = RESPONSE_HEADERS;
-  String out = _assembleHead(request->version());
-  size_t outLen = out.length();
+
+  // String header_str = _assembleHead(request->version());
+
+  uint16_t header_max_length = 250;
+  char header_ctr[header_max_length];//write header into output string //maximum header size for stability
+  char* header_ptr = &header_ctr[0];
+  size_t header_str_Len = _assembleHead(header_ptr, request->version(), header_max_length);
+
   size_t space = request->client()->space();
-  if(!_contentLength && space >= outLen){
-    _writtenLength += request->client()->write(out.c_str(), outLen);
+
+  if(!_contentLength && space >= header_str_Len){ 
+    #ifdef DEBUG_ASYNC
+      Serial.printf("{No Body: Send head}!_contentLength[%d] && space[%d] >= outLen[%d]\n\r",_contentLength,space,header_str_Len);
+    #endif
+    if(header_ptr != nullptr){
+      _writtenLength += request->client()->write(header_ptr, header_str_Len);
+    }
     _state = RESPONSE_WAIT_ACK;
-  } else if(_contentLength && space >= outLen + _contentLength){
-    out += _content;
-    outLen += _contentLength;
-    _writtenLength += request->client()->write(out.c_str(), outLen);
+  } else 
+  if(_contentLength && space >= header_str_Len + _contentLength){ 
+    #ifdef DEBUG_ASYNC
+      Serial.printf("{Header+Body: Send all}_contentLength[%d] && space[%d] >= outLen[%d] + _contentLength[%d]\n\r",
+      _contentLength,space,header_str_Len,_contentLength);
+      Serial.printf("out.c_str()=BEFORE\n\r");
+      Serial.println(header_str);
+    #endif
+    
+    // Transmit header
+    if(header_ptr != nullptr){
+      _writtenLength += request->client()->write(header_ptr, header_str_Len);
+    }
+    // Transmit body using null terminated array IF it was set
+    if(_content_ptr != nullptr){
+      #ifdef DEBUG_ASYNC
+      Serial.printf("_content_ptr != nullptr\n\r");
+      #endif
+      _writtenLength += request->client()->write(_content_ptr, _content_len);
+    }
+    #ifdef DEBUG_ASYNC
+      Serial.printf("_writtenLength=%d\n\r",_writtenLength);
+    #endif
     _state = RESPONSE_WAIT_ACK;
-  } else if(space && space < outLen){
-    String partial = out.substring(0, space);
-    _content = out.substring(space) + _content;
-    _contentLength += outLen - space;
-    _writtenLength += request->client()->write(partial.c_str(), partial.length());
-    _state = RESPONSE_CONTENT;
-  } else if(space > outLen && space < (outLen + _contentLength)){
-    size_t shift = space - outLen;
-    outLen += shift;
-    _sentLength += shift;
-    out += _content.substring(0, shift);
-    _content = _content.substring(shift);
-    _writtenLength += request->client()->write(out.c_str(), outLen);
-    _state = RESPONSE_CONTENT;
-  } else {
-    _content = out + _content;
-    _contentLength += outLen;
+  } 
+  // else if(space && space < outLen){
+  // #ifdef DEBUG_ASYNC
+  //   Serial.printf("{Send partial}space[%d] && space[%d] < outLen[%d]\n\r",space,space,outLen);
+  //   #endif
+  //   String partial = out.substring(0, space);
+  //   _content = out.substring(space) + _content;
+  //   _contentLength += outLen - space;
+  //   _writtenLength += request->client()->write(partial.c_str(), partial.length());
+  //   _state = RESPONSE_CONTENT;
+  // } else if(space > outLen && space < (outLen + _contentLength)){ 
+  // #ifdef DEBUG_ASYNC
+  //   Serial.printf("{Send partial remaining}space[%d] > outLen[%d] && space[%d] < (outLen[%d] + _contentLength[%d])\n\r",
+  //     space,outLen,space,outLen,_contentLength);
+  //     #endif
+  //   size_t shift = space - outLen;
+  //   outLen += shift;
+  //   _sentLength += shift;
+  //   out += _content.substring(0, shift);
+  //   _content = _content.substring(shift); 
+  // #ifdef DEBUG_ASYNC
+  //   Serial.printf("request->client()->write(out.ctr(),outlen[%d])  shift[%d] \n\r",outLen,shift);
+  //   #endif
+  //   _writtenLength += request->client()->write(out.c_str(), outLen); 
+  // #ifdef DEBUG_ASYNC
+  //   Serial.println("request->client()->write DONE");
+  //   #endif
+  //   _state = RESPONSE_CONTENT;
+  // }
+   else { 
+    #ifdef DEBUG_ASYNC
+      Serial.println("{Send nothing}else");
+    #endif
+    // _content = out + _content;
+    // _contentLength += outLen;
     _state = RESPONSE_CONTENT;
   }
+
+  #ifdef DEBUG_ASYNC
+  Serial.printf("space=%d\n\r",space);
+  Serial.printf("_writtenLength=%d of %d\n\r",_writtenLength, header_str_Len);
+  #endif
+
 }
 
+/**
+ * Converted to send pointer
+ * * */
 size_t AsyncBasicResponse::_ack(AsyncWebServerRequest *request, size_t len, uint32_t time){
-  (void)time;
   _ackedLength += len;
   if(_state == RESPONSE_CONTENT){
     size_t available = _contentLength - _sentLength;
     size_t space = request->client()->space();
     //we can fit in this packet
     if(space > available){
-      _writtenLength += request->client()->write(_content.c_str(), available);
-      _content = String();
+      if(_content_ptr != nullptr){
+        _writtenLength += request->client()->write(_content_ptr, available);
+        _content_ptr = 0; //_content_str = String();    //resetting
+      }      
       _state = RESPONSE_WAIT_ACK;
       return available;
     }
     //send some data, the rest on ack
-    String out = _content.substring(0, space);
-    _content = _content.substring(space);
-    _sentLength += space;
-    _writtenLength += request->client()->write(out.c_str(), space);
+    if(_content_ptr != nullptr){
+      _writtenLength += request->client()->write(_content_ptr+_content_sent, space);
+      _content_sent += _writtenLength;
+      _sentLength += _content_sent;
+    }
     return space;
   } else if(_state == RESPONSE_WAIT_ACK){
     if(_ackedLength >= _writtenLength){
@@ -255,14 +346,18 @@ AsyncAbstractResponse::AsyncAbstractResponse(AwsTemplateProcessor callback): _ca
 }
 
 void AsyncAbstractResponse::_respond(AsyncWebServerRequest *request){
-  addHeader("Connection","close");
-  _head = _assembleHead(request->version());
+  addHeader(PSTR("Connection"),PSTR("close"));
+
+  uint16_t header_max_length = 250;
+  char header_ctr[header_max_length];//write header into output string //maximum header size for stability
+  char* header_ptr = &header_ctr[0];
+  size_t header_str_Len = _assembleHead(header_ptr, request->version(), header_max_length);
+  _head = String(header_ctr);//_assembleHead(request->version());
   _state = RESPONSE_HEADERS;
   _ack(request, 0, 0);
 }
 
 size_t AsyncAbstractResponse::_ack(AsyncWebServerRequest *request, size_t len, uint32_t time){
-  (void)time;
   if(!_sourceValid()){
     _state = RESPONSE_FAILED;
     request->client()->close();
@@ -448,7 +543,6 @@ size_t AsyncAbstractResponse::_fillBufferAndProcessTemplates(uint8_t* data, size
         _cache.insert(_cache.begin(), &data[originalLen - (pTemplateStart + numBytesCopied - pTemplateEnd - 1)], &data[len]);
         //2. parameter value is longer than placeholder text, push the data after placeholder which not saved into cache further to the end
         memmove(pTemplateStart + numBytesCopied, pTemplateEnd + 1, &data[originalLen] - pTemplateStart - numBytesCopied);
-        len = originalLen; // fix issue with truncated data, not sure if it has any side effects
       } else if(pTemplateEnd + 1 != pTemplateStart + numBytesCopied)
         //2. Either parameter value is shorter than placeholder text OR there is enough free space in buffer to fit.
         //   Move the entire data after the placeholder
@@ -483,34 +577,35 @@ AsyncFileResponse::~AsyncFileResponse(){
 }
 
 void AsyncFileResponse::_setContentType(const String& path){
-  if (path.endsWith(".html")) _contentType = "text/html";
-  else if (path.endsWith(".htm")) _contentType = "text/html";
-  else if (path.endsWith(".css")) _contentType = "text/css";
-  else if (path.endsWith(".json")) _contentType = "application/json";
-  else if (path.endsWith(".js")) _contentType = "application/javascript";
-  else if (path.endsWith(".png")) _contentType = "image/png";
-  else if (path.endsWith(".gif")) _contentType = "image/gif";
-  else if (path.endsWith(".jpg")) _contentType = "image/jpeg";
-  else if (path.endsWith(".ico")) _contentType = "image/x-icon";
-  else if (path.endsWith(".svg")) _contentType = "image/svg+xml";
-  else if (path.endsWith(".eot")) _contentType = "font/eot";
-  else if (path.endsWith(".woff")) _contentType = "font/woff";
-  else if (path.endsWith(".woff2")) _contentType = "font/woff2";
-  else if (path.endsWith(".ttf")) _contentType = "font/ttf";
-  else if (path.endsWith(".xml")) _contentType = "text/xml";
-  else if (path.endsWith(".pdf")) _contentType = "application/pdf";
-  else if (path.endsWith(".zip")) _contentType = "application/zip";
-  else if(path.endsWith(".gz")) _contentType = "application/x-gzip";
-  else _contentType = "text/plain";
+  if (path.endsWith(".html")) sprintf(_contentType,PSTR("text/html"));
+  else if (path.endsWith(".htm")) sprintf(_contentType,PSTR("text/html"));
+  else if (path.endsWith(".css")) sprintf(_contentType,PSTR("text/css"));
+  else if (path.endsWith(".json")) sprintf(_contentType,PSTR("application/json"));
+  else if (path.endsWith(".js")) sprintf(_contentType,PSTR("application/javascript"));
+  else if (path.endsWith(".png")) sprintf(_contentType,PSTR("image/png"));
+  else if (path.endsWith(".gif")) sprintf(_contentType,PSTR("image/gif"));
+  else if (path.endsWith(".jpg")) sprintf(_contentType,PSTR("image/jpeg"));
+  else if (path.endsWith(".ico")) sprintf(_contentType,PSTR("image/x-icon"));
+  else if (path.endsWith(".svg")) sprintf(_contentType,PSTR("image/svg+xml"));
+  else if (path.endsWith(".eot")) sprintf(_contentType,PSTR("font/eot"));
+  else if (path.endsWith(".woff")) sprintf(_contentType,PSTR("font/woff"));
+  else if (path.endsWith(".woff2")) sprintf(_contentType,PSTR("font/woff2"));
+  else if (path.endsWith(".ttf")) sprintf(_contentType,PSTR("font/ttf"));
+  else if (path.endsWith(".xml")) sprintf(_contentType,PSTR("text/xml"));
+  else if (path.endsWith(".pdf")) sprintf(_contentType,PSTR("application/pdf"));
+  else if (path.endsWith(".zip")) sprintf(_contentType,PSTR("application/zip"));
+  else if(path.endsWith(".gz")) sprintf(_contentType,PSTR("application/x-gzip"));
+  else sprintf(_contentType,PSTR("text/plain"));
 }
 
-AsyncFileResponse::AsyncFileResponse(FS &fs, const String& path, const String& contentType, bool download, AwsTemplateProcessor callback): AsyncAbstractResponse(callback){
+AsyncFileResponse::AsyncFileResponse(FS &fs, const char* path1, char* contentType, bool download, AwsTemplateProcessor callback): AsyncAbstractResponse(callback){
   _code = 200;
+  String path = String(path1);
   _path = path;
 
   if(!download && !fs.exists(_path) && fs.exists(_path+".gz")){
     _path = _path+".gz";
-    addHeader("Content-Encoding", "gzip");
+    addHeader(PSTR("Content-Encoding"), PSTR("gzip"));
     _callback = nullptr; // Unable to process zipped templates
     _sendContentLength = true;
     _chunked = false;
@@ -530,20 +625,22 @@ AsyncFileResponse::AsyncFileResponse(FS &fs, const String& path, const String& c
 
   if(download) {
     // set filename and force download
-    snprintf(buf, sizeof (buf), "attachment; filename=\"%s\"", filename);
+    snprintf(buf, sizeof (buf), PSTR("attachment; filename=\"%s\""), filename);
   } else {
     // set filename and force rendering
-    snprintf(buf, sizeof (buf), "inline; filename=\"%s\"", filename);
+    snprintf(buf, sizeof (buf), PSTR("inline; filename=\"%s\""), filename);
   }
-  addHeader("Content-Disposition", buf);
+  addHeader(PSTR("Content-Disposition"), buf);
 }
 
-AsyncFileResponse::AsyncFileResponse(File content, const String& path, const String& contentType, bool download, AwsTemplateProcessor callback): AsyncAbstractResponse(callback){
+AsyncFileResponse::AsyncFileResponse(File content, const char* path1, char* contentType, bool download, AwsTemplateProcessor callback): AsyncAbstractResponse(callback){
   _code = 200;
+  
+  String path = String(path1);
   _path = path;
 
   if(!download && String(content.name()).endsWith(".gz") && !path.endsWith(".gz")){
-    addHeader("Content-Encoding", "gzip");
+    addHeader(PSTR("Content-Encoding"), PSTR("gzip"));
     _callback = nullptr; // Unable to process gzipped templates
     _sendContentLength = true;
     _chunked = false;
@@ -562,11 +659,11 @@ AsyncFileResponse::AsyncFileResponse(File content, const String& path, const Str
   char* filename = (char*)path.c_str() + filenameStart;
 
   if(download) {
-    snprintf(buf, sizeof (buf), "attachment; filename=\"%s\"", filename);
+    snprintf(buf, sizeof (buf), PSTR("attachment; filename=\"%s\""), filename);
   } else {
-    snprintf(buf, sizeof (buf), "inline; filename=\"%s\"", filename);
+    snprintf(buf, sizeof (buf), PSTR("inline; filename=\"%s\""), filename);
   }
-  addHeader("Content-Disposition", buf);
+  addHeader(PSTR("Content-Disposition"), buf);
 }
 
 size_t AsyncFileResponse::_fillBuffer(uint8_t *data, size_t len){
@@ -577,7 +674,7 @@ size_t AsyncFileResponse::_fillBuffer(uint8_t *data, size_t len){
  * Stream Response
  * */
 
-AsyncStreamResponse::AsyncStreamResponse(Stream &stream, const String& contentType, size_t len, AwsTemplateProcessor callback): AsyncAbstractResponse(callback) {
+AsyncStreamResponse::AsyncStreamResponse(Stream &stream, char* contentType, size_t len, AwsTemplateProcessor callback): AsyncAbstractResponse(callback) {
   _code = 200;
   _content = &stream;
   _contentLength = len;
@@ -597,7 +694,7 @@ size_t AsyncStreamResponse::_fillBuffer(uint8_t *data, size_t len){
  * Callback Response
  * */
 
-AsyncCallbackResponse::AsyncCallbackResponse(const String& contentType, size_t len, AwsResponseFiller callback, AwsTemplateProcessor templateCallback): AsyncAbstractResponse(templateCallback) {
+AsyncCallbackResponse::AsyncCallbackResponse(char* contentType, size_t len, AwsResponseFiller callback, AwsTemplateProcessor templateCallback): AsyncAbstractResponse(templateCallback) {
   _code = 200;
   _content = callback;
   _contentLength = len;
@@ -619,7 +716,7 @@ size_t AsyncCallbackResponse::_fillBuffer(uint8_t *data, size_t len){
  * Chunked Response
  * */
 
-AsyncChunkedResponse::AsyncChunkedResponse(const String& contentType, AwsResponseFiller callback, AwsTemplateProcessor processorCallback): AsyncAbstractResponse(processorCallback) {
+AsyncChunkedResponse::AsyncChunkedResponse(char* contentType, AwsResponseFiller callback, AwsTemplateProcessor processorCallback): AsyncAbstractResponse(processorCallback) {
   _code = 200;
   _content = callback;
   _contentLength = 0;
@@ -641,22 +738,29 @@ size_t AsyncChunkedResponse::_fillBuffer(uint8_t *data, size_t len){
  * Progmem Response
  * */
 
-AsyncProgmemResponse::AsyncProgmemResponse(int code, const String& contentType, const uint8_t * content, size_t len, AwsTemplateProcessor callback): AsyncAbstractResponse(callback) {
+AsyncProgmemResponse::AsyncProgmemResponse(int code, char* contentType, const uint8_t * content, size_t len, AwsTemplateProcessor callback): AsyncAbstractResponse(callback) {
   _code = code;
-  _content = content;
+  _content_ptr = content;
   _contentType = contentType;
   _contentLength = len;
   _readLength = 0;
+
+  #ifdef DEBUG_ASYNC
+  Serial.printf("AsyncProgmemResponse built");
+  #endif
 }
 
 size_t AsyncProgmemResponse::_fillBuffer(uint8_t *data, size_t len){
+  #ifdef DEBUG_ASYNC
+  Serial.println("_fillBuffer(uint8_t *data, size_t len)");
+  #endif
   size_t left = _contentLength - _readLength;
   if (left > len) {
-    memcpy_P(data, _content + _readLength, len);
+    memcpy_P(data, _content_ptr + _readLength, len);
     _readLength += len;
     return len;
   }
-  memcpy_P(data, _content + _readLength, left);
+  memcpy_P(data, _content_ptr + _readLength, left);
   _readLength += left;
   return left;
 }
@@ -666,7 +770,7 @@ size_t AsyncProgmemResponse::_fillBuffer(uint8_t *data, size_t len){
  * Response Stream (You can print/write/printf to it, up to the contentLen bytes)
  * */
 
-AsyncResponseStream::AsyncResponseStream(const String& contentType, size_t bufferSize){
+AsyncResponseStream::AsyncResponseStream(char* contentType, size_t bufferSize){
   _code = 200;
   _contentLength = 0;
   _contentType = contentType;
@@ -682,8 +786,11 @@ size_t AsyncResponseStream::_fillBuffer(uint8_t *buf, size_t maxLen){
 }
 
 size_t AsyncResponseStream::write(const uint8_t *data, size_t len){
-  if(_started())
+  //Serial.println("AsyncResponseStream::write");
+  if(_started()){   
+   //Serial.println("here?");
     return 0;
+  }
 
   if(len > _content->room()){
     size_t needed = len - _content->room();

@@ -22,6 +22,8 @@
 #include "WebResponseImpl.h"
 #include "WebAuthentication.h"
 
+// #define DEBUG_ASYNC
+
 #ifndef ESP8266
 #define os_strlen strlen
 #endif
@@ -55,7 +57,6 @@ AsyncWebServerRequest::AsyncWebServerRequest(AsyncWebServer* s, AsyncClient* c)
   , _parsedLength(0)
   , _headers(LinkedList<AsyncWebHeader *>([](AsyncWebHeader *h){ delete h; }))
   , _params(LinkedList<AsyncWebParameter *>([](AsyncWebParameter *p){ delete p; }))
-  , _pathParams(LinkedList<String *>([](String *p){ delete p; }))
   , _multiParseState(0)
   , _boundaryPosition(0)
   , _itemStartIndex(0)
@@ -69,24 +70,26 @@ AsyncWebServerRequest::AsyncWebServerRequest(AsyncWebServer* s, AsyncClient* c)
   , _itemIsFile(false)
   , _tempObject(NULL)
 {
-  c->onError([](void *r, AsyncClient* c, int8_t error){ (void)c; AsyncWebServerRequest *req = (AsyncWebServerRequest*)r; req->_onError(error); }, this);
-  c->onAck([](void *r, AsyncClient* c, size_t len, uint32_t time){ (void)c; AsyncWebServerRequest *req = (AsyncWebServerRequest*)r; req->_onAck(len, time); }, this);
+  c->onError([](void *r, AsyncClient* c, int8_t error){ AsyncWebServerRequest *req = (AsyncWebServerRequest*)r; req->_onError(error); }, this);
+  c->onAck([](void *r, AsyncClient* c, size_t len, uint32_t time){ AsyncWebServerRequest *req = (AsyncWebServerRequest*)r; req->_onAck(len, time); }, this);
   c->onDisconnect([](void *r, AsyncClient* c){ AsyncWebServerRequest *req = (AsyncWebServerRequest*)r; req->_onDisconnect(); delete c; }, this);
-  c->onTimeout([](void *r, AsyncClient* c, uint32_t time){ (void)c; AsyncWebServerRequest *req = (AsyncWebServerRequest*)r; req->_onTimeout(time); }, this);
-  c->onData([](void *r, AsyncClient* c, void *buf, size_t len){ (void)c; AsyncWebServerRequest *req = (AsyncWebServerRequest*)r; req->_onData(buf, len); }, this);
-  c->onPoll([](void *r, AsyncClient* c){ (void)c; AsyncWebServerRequest *req = ( AsyncWebServerRequest*)r; req->_onPoll(); }, this);
+  c->onTimeout([](void *r, AsyncClient* c, uint32_t time){ AsyncWebServerRequest *req = (AsyncWebServerRequest*)r; req->_onTimeout(time); }, this);
+  c->onData([](void *r, AsyncClient* c, void *buf, size_t len){ AsyncWebServerRequest *req = (AsyncWebServerRequest*)r; req->_onData(buf, len); }, this);
+  c->onPoll([](void *r, AsyncClient* c){ AsyncWebServerRequest *req = (AsyncWebServerRequest*)r; req->_onPoll(); }, this);
 }
 
 AsyncWebServerRequest::~AsyncWebServerRequest(){
   _headers.free();
 
   _params.free();
-  _pathParams.free();
 
   _interestingHeaders.free();
 
   if(_response != NULL){
+    uint16_t used_memory = ESP.getFreeHeap();
+    //Serial.printf("\n\rdelete _response %dB to ",ESP.getFreeHeap()); Serial.flush();
     delete _response;
+    //Serial.printf("%dB (freed %d)\n\r",ESP.getFreeHeap(),ESP.getFreeHeap()-used_memory); Serial.flush();
   }
 
   if(_tempObject != NULL){
@@ -96,6 +99,9 @@ AsyncWebServerRequest::~AsyncWebServerRequest(){
   if(_tempFile){
     _tempFile.close();
   }
+  #ifdef DEBUG_ASYNC_LIB
+    Serial.printf("~AsyncWebServerRequest\n\r\n\r\n\r");
+  #endif
 }
 
 void AsyncWebServerRequest::_onData(void *buf, size_t len){
@@ -190,29 +196,40 @@ void AsyncWebServerRequest::_removeNotInterestingHeaders(){
 void AsyncWebServerRequest::_onPoll(){
   //os_printf("p\n");
   if(_response != NULL && _client != NULL && _client->canSend() && !_response->_finished()){
+    
+  #ifdef DEBUG_ASYNC
+    Serial.printf("_onPoll\n\r");
+  #endif
     _response->_ack(this, 0, 0);
   }
 }
 
 void AsyncWebServerRequest::_onAck(size_t len, uint32_t time){
   //os_printf("a:%u:%u\n", len, time);
+  
+  #ifdef DEBUG_ASYNC
+    Serial.printf("_onAck\n\r");
+  #endif
+
   if(_response != NULL){
     if(!_response->_finished()){
       _response->_ack(this, len, time);
     } else {
       AsyncWebServerResponse* r = _response;
       _response = NULL;
+    Serial.printf("delete r %dB to ",ESP.getFreeHeap()); Serial.flush();
       delete r;
+      
+    Serial.printf("%dB\n\r",ESP.getFreeHeap()); Serial.flush();
     }
   }
 }
 
 void AsyncWebServerRequest::_onError(int8_t error){
-  (void)error;
+
 }
 
 void AsyncWebServerRequest::_onTimeout(uint32_t time){
-  (void)time;
   //os_printf("TIMEOUT: %u, state: %s\n", time, _client->stateToString());
   _client->close();
 }
@@ -231,10 +248,6 @@ void AsyncWebServerRequest::_onDisconnect(){
 
 void AsyncWebServerRequest::_addParam(AsyncWebParameter *p){
   _params.add(p);
-}
-
-void AsyncWebServerRequest::_addPathParam(const char *p){
-  _pathParams.add(new String(p));
 }
 
 void AsyncWebServerRequest::_addGetParams(const String& params){
@@ -317,11 +330,13 @@ bool AsyncWebServerRequest::_parseReqHeader(){
     if(name.equalsIgnoreCase("Host")){
       _host = value;
     } else if(name.equalsIgnoreCase("Content-Type")){
-	  _contentType = value.substring(0, value.indexOf(';'));
       if (value.startsWith("multipart/")){
         _boundary = value.substring(value.indexOf('=')+1);
         _boundary.replace("\"","");
+        _contentType = value.substring(0, value.indexOf(';'));
         _isMultipart = true;
+      } else {
+        _contentType = value;
       }
     } else if(name.equalsIgnoreCase("Content-Length")){
       _contentLength = atoi(value.c_str());
@@ -708,105 +723,218 @@ void AsyncWebServerRequest::addInterestingHeader(const String& name){
     _interestingHeaders.add(name);
 }
 
+
+/**
+ * 
+ *  Sending function, which handles transmission of data (now using pointer method for body)
+ * * */
 void AsyncWebServerRequest::send(AsyncWebServerResponse *response){
+  
+  #ifdef DEBUG_ASYNC
+  Serial.println("AsyncWebServerRequest::sendONE=S for ");
+  #endif
   _response = response;
-  if(_response == NULL){
+  if(_response == NULL){    
+    #ifdef DEBUG_ASYNC
+    Serial.println("_response == NULL");
+    #endif
     _client->close(true);
     _onDisconnect();
     return;
   }
   if(!_response->_sourceValid()){
+    // #ifdef DEBUG_ASYNC
+    Serial.println("!_response->_sourceValid()");
+    // #endif
     delete response;
     _response = NULL;
     send(500);
   }
   else {
+    #ifdef DEBUG_ASYNC
+      Serial.println("else _response->_respond(this)");
+    #endif
     _client->setRxTimeout(0);
     _response->_respond(this);
   }
+  #ifdef DEBUG_ASYNC
+  Serial.println("AsyncWebServerRequest::send=E");
+  #endif
 }
 
-AsyncWebServerResponse * AsyncWebServerRequest::beginResponse(int code, const String& contentType, const String& content){
+
+/**
+ *  LEGACY METHOD - String to remove
+ * * */
+AsyncWebServerResponse * AsyncWebServerRequest::beginResponse_serial(int code, char* contentType, char* content){
+  #ifdef DEBUG_ASYNC
+  Serial.println(F("WRONG FUNCTION AsyncWebServerRequest::beginResponse(int code, const char* contentType, const char* content"));
+  #endif
   return new AsyncBasicResponse(code, contentType, content);
 }
 
-AsyncWebServerResponse * AsyncWebServerRequest::beginResponse(FS &fs, const String& path, const String& contentType, bool download, AwsTemplateProcessor callback){
-  if(fs.exists(path) || (!download && fs.exists(path+".gz")))
+
+AsyncWebServerResponse * AsyncWebServerRequest::beginResponse(int code, char* contentType, char* content_ptr, uint16_t content_len){
+  #ifdef DEBUG_ASYNC
+  Serial.println(F("AsyncWebServerRequest::beginResponse(int code, const char* contentType, char* content_ptr, uint16_t content_len"));
+  #endif
+  return new AsyncBasicResponse(code, contentType, content_ptr, content_len);
+}
+
+AsyncWebServerResponse * AsyncWebServerRequest::beginResponse(FS &fs, char* path, char* contentType, bool download, AwsTemplateProcessor callback){
+  if(fs.exists(path) || (!download && fs.exists(String(path)+".gz")))
     return new AsyncFileResponse(fs, path, contentType, download, callback);
   return NULL;
 }
 
-AsyncWebServerResponse * AsyncWebServerRequest::beginResponse(File content, const String& path, const String& contentType, bool download, AwsTemplateProcessor callback){
+AsyncWebServerResponse * AsyncWebServerRequest::beginResponse(File content, char* path, char* contentType, bool download, AwsTemplateProcessor callback){
   if(content == true)
     return new AsyncFileResponse(content, path, contentType, download, callback);
   return NULL;
 }
 
-AsyncWebServerResponse * AsyncWebServerRequest::beginResponse(Stream &stream, const String& contentType, size_t len, AwsTemplateProcessor callback){
+AsyncWebServerResponse * AsyncWebServerRequest::beginResponse(Stream &stream, char* contentType, size_t len, AwsTemplateProcessor callback){
+  
+  #ifdef DEBUG_ASYNC
+  Serial.println(F("AsyncWebServerRequest::beginResponse(stream"));
+  #endif
   return new AsyncStreamResponse(stream, contentType, len, callback);
 }
 
-AsyncWebServerResponse * AsyncWebServerRequest::beginResponse(const String& contentType, size_t len, AwsResponseFiller callback, AwsTemplateProcessor templateCallback){
+AsyncWebServerResponse * AsyncWebServerRequest::beginResponse(char* contentType, size_t len, AwsResponseFiller callback, AwsTemplateProcessor templateCallback){
+  
+  #ifdef DEBUG_ASYNC
+  Serial.println(F("AsyncWebServerRequest::beginResponse(const St"));
+  #endif
   return new AsyncCallbackResponse(contentType, len, callback, templateCallback);
 }
 
-AsyncWebServerResponse * AsyncWebServerRequest::beginChunkedResponse(const String& contentType, AwsResponseFiller callback, AwsTemplateProcessor templateCallback){
+AsyncWebServerResponse * AsyncWebServerRequest::beginChunkedResponse(char* contentType, AwsResponseFiller callback, AwsTemplateProcessor templateCallback){
   if(_version)
     return new AsyncChunkedResponse(contentType, callback, templateCallback);
   return new AsyncCallbackResponse(contentType, 0, callback, templateCallback);
 }
 
-AsyncResponseStream * AsyncWebServerRequest::beginResponseStream(const String& contentType, size_t bufferSize){
+AsyncResponseStream * AsyncWebServerRequest::beginResponseStream(char* contentType, size_t bufferSize){
+  
+  #ifdef DEBUG_ASYNC
+  Serial.println("AsyncWebServerRequest::send=beginResponseStream");
+  #endif
   return new AsyncResponseStream(contentType, bufferSize);
 }
 
-AsyncWebServerResponse * AsyncWebServerRequest::beginResponse_P(int code, const String& contentType, const uint8_t * content, size_t len, AwsTemplateProcessor callback){
+AsyncWebServerResponse * AsyncWebServerRequest::beginResponse_P(int code, char* contentType, const uint8_t * content, size_t len, AwsTemplateProcessor callback){
+  
+  #ifdef DEBUG_ASYNC
+  Serial.println("AsyncWebServerRequest::send=beginResponse_P AsyncProgmemResponse");
+  #endif
   return new AsyncProgmemResponse(code, contentType, content, len, callback);
 }
 
-AsyncWebServerResponse * AsyncWebServerRequest::beginResponse_P(int code, const String& contentType, PGM_P content, AwsTemplateProcessor callback){
+AsyncWebServerResponse * AsyncWebServerRequest::beginResponse_P(int code, char* contentType, PGM_P content, AwsTemplateProcessor callback){
+  
+  #ifdef DEBUG_ASYNC
+  Serial.println(F("AsyncWebServerRequest::beginResponse_P(code"));
+  #endif
   return beginResponse_P(code, contentType, (const uint8_t *)content, strlen_P(content), callback);
 }
 
-void AsyncWebServerRequest::send(int code, const String& contentType, const String& content){
-  send(beginResponse(code, contentType, content));
+
+
+/**
+ *  LEGACY METHOD - String to remove
+ * * */
+void AsyncWebServerRequest::send_serial(int code, char* contentType, char* content){
+  // #ifdef DEBUG_WEBSERVER_LIB
+    Serial.printf("WARNING: String method called\n\r");
+  // #endif
+  
+  send(code, contentType);
+  
+  #ifdef DEBUG_ASYNC
+    Serial.println(F("send(beginResponse(code, contentType, content)); DONE"));
+  #endif
 }
 
-void AsyncWebServerRequest::send(FS &fs, const String& path, const String& contentType, bool download, AwsTemplateProcessor callback){
-  if(fs.exists(path) || (!download && fs.exists(path+".gz"))){
+
+void AsyncWebServerRequest::send(int code, char* contentType, char* content_ptr){
+
+  // #ifdef DEBUG_WEBSERVER_LIB
+    // Serial.printf("AsyncWebServerRequest::send2(int code, const char* contentType, const char* content)\n\r");
+  // #endif
+
+  uint16_t content_len = strlen(content_ptr);
+
+  send(beginResponse(code, contentType, content_ptr, content_len));
+  
+  #ifdef DEBUG_ASYNC
+  Serial.println(F("send2(beginResponse2(code, contentType, content)); DONE"));
+  #endif
+}
+
+
+void AsyncWebServerRequest::send(FS &fs, char* path, char* contentType, bool download, AwsTemplateProcessor callback){
+  if(fs.exists(path) || (!download && fs.exists(String(path)+".gz"))){
     send(beginResponse(fs, path, contentType, download, callback));
   } else send(404);
 }
 
-void AsyncWebServerRequest::send(File content, const String& path, const String& contentType, bool download, AwsTemplateProcessor callback){
+void AsyncWebServerRequest::send(File content, char* path, char* contentType, bool download, AwsTemplateProcessor callback){
+  
+  #ifdef DEBUG_ASYNC
+  Serial.println("AsyncWebServerRequest::send=File");
+  #endif
   if(content == true){
     send(beginResponse(content, path, contentType, download, callback));
   } else send(404);
 }
 
-void AsyncWebServerRequest::send(Stream &stream, const String& contentType, size_t len, AwsTemplateProcessor callback){
+void AsyncWebServerRequest::send(Stream &stream, char* contentType, size_t len, AwsTemplateProcessor callback){
+  
+  #ifdef DEBUG_ASYNC
+  Serial.println("AsyncWebServerRequest::send=Stream");
+  #endif
   send(beginResponse(stream, contentType, len, callback));
 }
 
-void AsyncWebServerRequest::send(const String& contentType, size_t len, AwsResponseFiller callback, AwsTemplateProcessor templateCallback){
+void AsyncWebServerRequest::send(char* contentType, size_t len, AwsResponseFiller callback, AwsTemplateProcessor templateCallback){
+  
+  #ifdef DEBUG_ASYNC
+  Serial.println("AsyncWebServerRequest::send=String");
+  #endif
   send(beginResponse(contentType, len, callback, templateCallback));
 }
 
-void AsyncWebServerRequest::sendChunked(const String& contentType, AwsResponseFiller callback, AwsTemplateProcessor templateCallback){
+void AsyncWebServerRequest::sendChunked(char* contentType, AwsResponseFiller callback, AwsTemplateProcessor templateCallback){
+  
+  #ifdef DEBUG_ASYNC
+  Serial.println("AsyncWebServerRequest::send=Sendchunked");
+  #endif
   send(beginChunkedResponse(contentType, callback, templateCallback));
 }
 
-void AsyncWebServerRequest::send_P(int code, const String& contentType, const uint8_t * content, size_t len, AwsTemplateProcessor callback){
+void AsyncWebServerRequest::send_P(int code, char* contentType, const uint8_t * content, size_t len, AwsTemplateProcessor callback){
+  
+  #ifdef DEBUG_ASYNC
+  Serial.println("AsyncWebServerRequest::send_P TEST1");
+  #endif
   send(beginResponse_P(code, contentType, content, len, callback));
 }
 
-void AsyncWebServerRequest::send_P(int code, const String& contentType, PGM_P content, AwsTemplateProcessor callback){
+void AsyncWebServerRequest::send_P(int code, char* contentType, PGM_P content, AwsTemplateProcessor callback){
+  
+  #ifdef DEBUG_ASYNC
+  Serial.println("AsyncWebServerRequest::send=Sendp3");
+  #endif
   send(beginResponse_P(code, contentType, content, callback));
 }
 
-void AsyncWebServerRequest::redirect(const String& url){
+
+
+
+void AsyncWebServerRequest::redirect(char* url){
   AsyncWebServerResponse * response = beginResponse(302);
-  response->addHeader("Location",url);
+  response->addHeader(PSTR("Location"),url);
   send(response);
 }
 
@@ -828,12 +956,12 @@ bool AsyncWebServerRequest::authenticate(const char * hash){
 
   if(_isDigest){
     String hStr = String(hash);
-    int separator = hStr.indexOf(":");
+    int separator = hStr.indexOf(PSTR(":"));
     if(separator <= 0)
       return false;
     String username = hStr.substring(0, separator);
     hStr = hStr.substring(separator + 1);
-    separator = hStr.indexOf(":");
+    separator = hStr.indexOf(PSTR(":"));
     if(separator <= 0)
       return false;
     String realm = hStr.substring(0, separator);
@@ -847,21 +975,21 @@ bool AsyncWebServerRequest::authenticate(const char * hash){
 void AsyncWebServerRequest::requestAuthentication(const char * realm, bool isDigest){
   AsyncWebServerResponse * r = beginResponse(401);
   if(!isDigest && realm == NULL){
-    r->addHeader("WWW-Authenticate", "Basic realm=\"Login Required\"");
+    r->addHeader(PSTR("WWW-Authenticate"), PSTR("Basic realm=\"Login Required\""));
   } else if(!isDigest){
     String header = "Basic realm=\"";
     header.concat(realm);
     header.concat("\"");
-    r->addHeader("WWW-Authenticate", header);
+    r->addHeader(PSTR("WWW-Authenticate"), header.c_str());
   } else {
     String header = "Digest ";
     header.concat(requestDigestAuthentication(realm));
-    r->addHeader("WWW-Authenticate", header);
+    r->addHeader(PSTR("WWW-Authenticate"), header.c_str());
   }
   send(r);
 }
 
-bool AsyncWebServerRequest::hasArg(const char* name) const {
+bool AsyncWebServerRequest::hasParam(const char* name) const {
   for(const auto& arg: _params){
     if(arg->name() == name){
       return true;
@@ -870,13 +998,13 @@ bool AsyncWebServerRequest::hasArg(const char* name) const {
   return false;
 }
 
-bool AsyncWebServerRequest::hasArg(const __FlashStringHelper * data) const {
+bool AsyncWebServerRequest::hasParam(const __FlashStringHelper * data) const {
   PGM_P p = reinterpret_cast<PGM_P>(data);
   size_t n = strlen_P(p); 
   char * name = (char*) malloc(n+1);
   if (name) {
     strcpy_P(name, p);    
-    bool result = hasArg( name ); 
+    bool result = hasParam( name ); 
     free(name); 
     return result; 
   } else {
@@ -915,11 +1043,6 @@ const String& AsyncWebServerRequest::arg(size_t i) const {
 
 const String& AsyncWebServerRequest::argName(size_t i) const {
   return getParam(i)->name();
-}
-
-const String& AsyncWebServerRequest::pathArg(size_t i) const {
-  auto param = _pathParams.nth(i);
-  return param ? **param : SharedEmptyString;
 }
 
 const String& AsyncWebServerRequest::header(const char* name) const {

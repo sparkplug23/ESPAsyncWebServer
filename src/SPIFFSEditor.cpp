@@ -477,16 +477,16 @@ void SPIFFSEditor::handleRequest(AsyncWebServerRequest *request){
       dir.close();
 #endif
       output += "]";
-      request->send(200, "application/json", output);
+      request->send_serial(200, "application/json", (char*)output.c_str());
       output = String();
     }
     else if(request->hasParam("edit") || request->hasParam("download")){
-      request->send(request->_tempFile, request->_tempFile.name(), String(), request->hasParam("download"));
+      // request->send(request->_tempFile, (char*)(request->_tempFile.name().c_str()), String().c_str(), request->hasParam("download"));
     }
     else {
       const char * buildTime = __DATE__ " " __TIME__ " GMT";
       if (request->header("If-Modified-Since").equals(buildTime)) {
-        request->send(304);
+        request->send_serial(304);
       } else {
         AsyncWebServerResponse *response = request->beginResponse_P(200, "text/html", edit_htm_gz, edit_htm_gz_len);
         response->addHeader("Content-Encoding", "gzip");
@@ -497,31 +497,32 @@ void SPIFFSEditor::handleRequest(AsyncWebServerRequest *request){
   } else if(request->method() == HTTP_DELETE){
     if(request->hasParam("path", true)){
         _fs.remove(request->getParam("path", true)->value());
-      request->send(200, "", "DELETE: "+request->getParam("path", true)->value());
+      // request->send_serial(200, "", String("DELETE: "+request->getParam("path", true)->value()).c_str());
     } else
-      request->send(404);
+      request->send_serial(404);
   } else if(request->method() == HTTP_POST){
-    if(request->hasParam("data", true, true) && _fs.exists(request->getParam("data", true, true)->value()))
-      request->send(200, "", "UPLOADED: "+request->getParam("data", true, true)->value());
-    else
-      request->send(500);
+    if(request->hasParam("data", true, true) && _fs.exists(request->getParam("data", true, true)->value())){
+      // request->send_serial(200, "", String("UPLOADED: "+request->getParam("data", true, true)->value()).c_str());
+    }else{
+      request->send_serial(500);
+    }
   } else if(request->method() == HTTP_PUT){
     if(request->hasParam("path", true)){
       String filename = request->getParam("path", true)->value();
       if(_fs.exists(filename)){
-        request->send(200);
+        request->send_serial(200);
       } else {
         fs::File f = _fs.open(filename, "w");
         if(f){
           f.write((uint8_t)0x00);
           f.close();
-          request->send(200, "", "CREATE: "+filename);
+          // request->send_serial(200, "", String("CREATE: "+filename).c_str());
         } else {
-          request->send(500);
+          request->send_serial(500);
         }
       }
     } else
-      request->send(400);
+      request->send_serial(400);
   }
 }
 

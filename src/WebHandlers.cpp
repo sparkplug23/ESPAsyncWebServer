@@ -64,7 +64,7 @@ AsyncStaticWebHandler& AsyncStaticWebHandler::setLastModified(const char* last_m
 
 AsyncStaticWebHandler& AsyncStaticWebHandler::setLastModified(struct tm* last_modified){
   char result[30];
-  strftime (result,30,"%a, %d %b %Y %H:%M:%S %Z", last_modified);
+  strftime (result,30,PSTR("%a, %d %b %Y %H:%M:%S %Z"), last_modified);
   return setLastModified((const char *)result);
 }
 
@@ -200,17 +200,18 @@ void AsyncStaticWebHandler::handleRequest(AsyncWebServerRequest *request)
       request->send(304); // Not modified
     } else if (_cache_control.length() && request->hasHeader("If-None-Match") && request->header("If-None-Match").equals(etag)) {
       request->_tempFile.close();
-      AsyncWebServerResponse * response = new AsyncBasicResponse(304); // Not modified
-      response->addHeader("Cache-Control", _cache_control);
-      response->addHeader("ETag", etag);
-      request->send(response);
+      // AsyncWebServerResponse * response = new AsyncBasicResponse(304); // Not modified
+      // response->addHeader("Cache-Control", _cache_control);
+      // response->addHeader("ETag", etag);
+      // request->send(response);
+      Serial.print(F("WARNING DISABLED CODE"));
     } else {
-      AsyncWebServerResponse * response = new AsyncFileResponse(request->_tempFile, filename, String(), false, _callback);
+      AsyncWebServerResponse * response = new AsyncFileResponse(request->_tempFile, filename.c_str(), "", false, _callback);//String().c_str(), false, _callback);
       if (_last_modified.length())
-        response->addHeader("Last-Modified", _last_modified);
+        response->addHeader("Last-Modified", _last_modified.c_str());
       if (_cache_control.length()){
-        response->addHeader("Cache-Control", _cache_control);
-        response->addHeader("ETag", etag);
+        response->addHeader("Cache-Control", _cache_control.c_str());
+        response->addHeader("ETag", etag.c_str());
       }
       request->send(response);
     }
